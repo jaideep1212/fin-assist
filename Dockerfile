@@ -1,17 +1,20 @@
-# Custom Jenkins image: the official Jenkins LTS plus the Docker command-line
-# tool, so pipelines can build images and run containers on the Pi's Docker.
-# This installs only the Docker CLI (the client), not a second Docker engine.
+# Reusable Python image for the fin-assist project.
+# Used by Jenkins to run tests, and later by the daily job to run the data
+# processing. Commands are passed at run time (e.g. `docker run --rm fin-assist pytest`),
+# so this single image serves every Python task on the Pi.
 
-FROM jenkins/jenkins:lts-jdk17
+FROM python:3.12-slim
 
-USER root
+# All work happens in /app inside the container.
+WORKDIR /app
 
-RUN apt-get update && apt-get install -y ca-certificates curl && \
-    install -m 0755 -d /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
-    chmod a+r /etc/apt/keyrings/docker.asc && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" > /etc/apt/sources.list.d/docker.list && \
-    apt-get update && apt-get install -y docker-ce-cli && \
-    rm -rf /var/lib/apt/lists/*
+# Install dependencies first. Docker caches this layer and only re-runs it
+# when requirements.txt changes, which keeps rebuilds fast.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-USER jenkins
+# Copy the project code into the image.
+COPY . .
+
+# Default command if none is given. Real tasks override this at `docker run`.
+CMD ["python", "-c", "print('fin-assist image ready - pass a command to run a task')"]

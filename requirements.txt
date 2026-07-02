@@ -1,0 +1,4 @@
+# Python dependencies for the fin-assist project.
+# Pinned versions keep builds reproducible. Add new dependencies here as the
+# project grows (e.g. database driver, Azure SDK).
+pytest==8.3.4
