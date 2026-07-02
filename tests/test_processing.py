@@ -1,4 +1,4 @@
-"""Tests for fin_assist.processing."""
+"""Tests for src.processing."""
 
 from datetime import datetime
 
