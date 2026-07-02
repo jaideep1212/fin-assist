@@ -1,25 +1,33 @@
-// Jenkinsfile — defines the CI pipeline as code.
-// This starter version just proves Jenkins can pull the repo from GitHub and run.
-// We'll add real steps (Python setup, tests) later.
+// Jenkinsfile — CI pipeline for fin-assist.
+// Jenkins builds the project's Docker image, then runs the tests inside a
+// fresh, throwaway container. Jenkins never runs Python itself; it only
+// orchestrates Docker (Option A).
 
 pipeline {
     agent any
+
     stages {
-        stage('Checkout') {
+        stage('Build image') {
             steps {
-                echo 'Checked out fin-assist from GitHub.'
+                echo 'Building the fin-assist image from the checked-out code...'
+                sh 'docker build -t fin-assist:ci .'
             }
         }
-        stage('Set up Python') {
+
+        stage('Run tests') {
             steps {
-                sh 'python3 -m venv venv'
-                sh './venv/bin/pip install -r requirements.txt'
+                echo 'Running pytest inside a throwaway container...'
+                sh 'docker run --rm fin-assist:ci pytest -q'
             }
         }
-        stage('Run tests') {          // <-- the step you're asking about
-            steps {
-                sh './venv/bin/pytest'
-            }
+    }
+
+    post {
+        success {
+            echo 'All tests passed. Pipeline is green.'
+        }
+        failure {
+            echo 'Pipeline failed. Check the console output above for the reason.'
         }
     }
 }
