@@ -1,0 +1,26 @@
+# ---- Secrets (NEVER commit these) ----
+.env
+.env.*
+*.env
+secrets/
+*.key
+*.pem
+*credentials*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ---- Generated output (the CSV goes to Azure, not the repo) ----
+output/
+*.log
+
+# ---- OS / editor cruft ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
