@@ -1,7 +1,5 @@
-# Python dependencies for the fin-assist project.
-# Pinned versions keep builds reproducible. Add new dependencies here as the
-# project grows (e.g. database driver, Azure SDK).
-pytest==8.3.4
+# Runtime dependencies — what the app needs to RUN.
+# Test-only tools (pytest, httpx) live in requirements-dev.txt.
 fastapi>=0.110
 uvicorn[standard]>=0.29
 sqlalchemy>=2.0

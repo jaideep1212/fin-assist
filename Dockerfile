@@ -9,9 +9,11 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install dependencies first. Docker caches this layer and only re-runs it
-# when requirements.txt changes, which keeps rebuilds fast.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# when the requirements files change, which keeps rebuilds fast.
+# requirements-dev.txt pulls in requirements.txt too, so this one image can run
+# both the app tasks AND pytest.
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
 
 # Copy the project code into the image.
 COPY . .
