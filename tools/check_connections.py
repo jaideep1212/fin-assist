@@ -29,6 +29,7 @@ pg_db = os.getenv("PG_DB")
 
 def test_sqlserver():
     import pyodbc
+
     conn_str = (
         "DRIVER={ODBC Driver 18 for SQL Server};"
         f"SERVER={sqlserver};DATABASE={sql_db};"
@@ -43,6 +44,7 @@ def test_sqlserver():
 
 def test_postgres():
     import psycopg
+
     pg_pwd = os.getenv("PGPASSWORD")
     if not pg_pwd:
         print("[FAIL] PostgreSQL: PGPASSWORD environment variable is not set.")
@@ -58,7 +60,9 @@ def test_postgres():
                 "WHERE table_schema = 'public'"
             )
             count = cur.fetchone()[0]
-            print(f"[OK] PostgreSQL '{pg_db}' on the Pi: connected, {count} tables found.")
+            print(
+                f"[OK] PostgreSQL '{pg_db}' on the Pi: connected, {count} tables found."
+            )
     return True
 
 
@@ -79,6 +83,9 @@ if __name__ == "__main__":
         print(f"[FAIL] PostgreSQL: {exc}")
 
     print()
-    print("Both connections OK - ready to build the copy." if ok
-          else "Fix the failures above before continuing.")
+    print(
+        "Both connections OK - ready to build the copy."
+        if ok
+        else "Fix the failures above before continuing."
+    )
     sys.exit(0 if ok else 1)
