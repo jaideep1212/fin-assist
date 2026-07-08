@@ -53,14 +53,19 @@ def main() -> None:
     )
     tz = os.getenv("WATCHDOG_TZ", "UTC")
     dh, dm = (int(x) for x in os.getenv("WATCHDOG_DAY_START", "00:00").split(":"))
-    hh, mm = (int(x) for x in os.getenv("WATCHDOG_CUTOFF", "23:30").split(":"))
+
+    kwargs = {}
+    cutoff_env = os.getenv("WATCHDOG_CUTOFF")
+    if cutoff_env:
+        hh, mm = (int(x) for x in cutoff_env.split(":"))
+        kwargs["cutoff"] = dtime(hh, mm)
 
     watchdog = DailyWatchdog(
         job=build_daily_job(build_sink()),
         is_awake=is_pi_awake,
-        cutoff=dtime(hh, mm),
         day_start=dtime(dh, dm),
         tz=tz,
+        **kwargs,
     )
 
     scheduler = BlockingScheduler(timezone=tz)
