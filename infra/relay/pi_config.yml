@@ -10,6 +10,6 @@ RemoteForward:
     Host: localhost
     HostPort: 5432
     PortName: pg
-    ConnectionString: "<PI_LISTEN_CONN_STR>"
+    ConnectionString: "<PI_SEND_CONN_STR>"
 
 LogLevel: INFO

@@ -50,4 +50,3 @@ properties:
             value: "fin-assist-relay"
           - name: RELAY_SEND_CONNSTR
             secretRef: "<AZURE_SEND_CONN_STR>"
-
