@@ -25,3 +25,13 @@ Thumbs.db
 .vscode/
 .idea/
 infra/relay/pi_config.yml
+notes/
+
+# ---- Terraform ----
+*.tfvars
+*.tfvars.json
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan
