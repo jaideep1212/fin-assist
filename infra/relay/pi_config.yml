@@ -1,0 +1,15 @@
+# azbridge config for the Raspberry Pi — REMOTE forwarder (listener side).
+# Publishes the Pi's local PostgreSQL through the 'pgdb' hybrid connection.
+# The Pi only makes OUTBOUND 443 to Azure Relay; nothing is exposed inbound.
+#
+# ConnectionString: use the LISTEN-only SAS key (see RELAY_SETUP.md).
+# Keep this file root-readable only (chmod 600); it contains a secret.
+
+RemoteForward:
+  - RelayName: pgdb
+    Host: localhost
+    HostPort: 5432
+    PortName: pg
+    ConnectionString: <PI_SEND_CONN_STR>
+
+LogLevel: INFO

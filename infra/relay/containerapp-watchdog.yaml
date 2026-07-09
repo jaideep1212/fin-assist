@@ -1,0 +1,52 @@
+# Example Container App: the watchdog + azbridge sidecar in one replica.
+# Both containers share localhost, so the watchdog reaches Postgres at
+# 127.0.0.1:5432 (the sidecar's local forwarder).
+#
+#   az containerapp create -g rg-financial-rec -n financial-watchdog \
+#     --environment cae-financial --yaml containerapp-watchdog.yaml
+#
+# The API app is the same idea: swap the app container's command for uvicorn
+# and add ingress. Both apps that touch the DB carry their own azbridge sidecar.
+
+properties:
+  managedEnvironmentId: /subscriptions/<SUBSCRIPTION_ID>/resourcegroups/fin-assist-rg/providers/Microsoft.App/managedEnvironments/fin-assist-cae
+  configuration:
+    secrets:
+      - name: db-url
+        value: "postgresql://<PG_DB_USERNAME>:<PG_DB_PASSWORD>@127.0.0.1:5432/<PG_DB_NAME>"
+      - name: relay-send-connstr
+        value: <AZURE_SEND_CONN_STR>
+      - name: acr-password
+        value: <ACR_PASSWORD>
+    registries:
+      - server: finassistacr.azurecr.io
+        username: finassistacr
+        passwordSecretRef: acr-password
+  template:
+    scale:
+      minReplicas: 1        # watchdog is always-on so it can poll every minute
+      maxReplicas: 1
+    containers:
+      - name: watchdog
+        image: finassistacr.azurecr.io/finassist:v1
+        command: ["python", "run_watchdog.py"]
+        resources: { cpu: 0.25, memory: 0.5Gi }
+        env:
+          - name: DATABASE_URL
+            secretRef: db-url
+          - name: WATCHDOG_TZ
+            value: "UTC"
+          - name: WATCHDOG_DAY_START
+            value: "16:00"
+          - name: SINK
+            value: "local"   # will set it to blob once the test run completes successfully
+          #- name: BLOB_CONN_STR
+          #  secretRef: blob-conn-str
+      - name: azbridge
+        image: finassistacr.azurecr.io/azbridge-sidecar:v1
+        resources: { cpu: 0.25, memory: 0.5Gi }
+        env:
+          - name: RELAY_NAMESPACE
+            value: "fin-assist-relay"
+          - name: RELAY_SEND_CONNSTR
+            secretRef: <AZURE_SEND_CONN_STR>
