@@ -12,14 +12,14 @@ Env:
   WATCHDOG_TZ         IANA timezone for the day boundary and cutoff (default UTC)
   WATCHDOG_DAY_START  HH:MM at which a new watchdog day begins (default 00:00).
                       Set to 16:00 for a day that runs 16:00 -> 15:59 next day.
-  WATCHDOG_CUTOFF     HH:MM after which a day with no successful run is MISSED
-                      (default 23:30). NOTE: this is resolved to the first
-                      occurrence at or after WATCHDOG_DAY_START, so with a
-                      16:00 start you almost certainly want a later cutoff
-                      (e.g. 15:59) to keep the whole day usable.
+  WATCHDOG_CUTOFF     HH:MM after which a day with no successful run is MISSED.
+                      Optional: if unset, defaults to the whole watchdog day
+                      (the minute before the next WATCHDOG_DAY_START). Set it
+                      only to give up earlier than the day boundary. When set,
+                      it is resolved to the first occurrence at or after
+                      WATCHDOG_DAY_START.
   SINK / SINK_ROOT / BLOB_* : see app/sinks.py
 """
-
 from __future__ import annotations
 
 import logging
@@ -42,7 +42,6 @@ def build_daily_job(sink: Sink):
         for name, df in frames.items():
             dest = sink.write(name, df, run_date)
             log.info("Wrote %s (%d rows) -> %s", name, len(df), dest)
-
     return job
 
 
@@ -54,6 +53,9 @@ def main() -> None:
     tz = os.getenv("WATCHDOG_TZ", "UTC")
     dh, dm = (int(x) for x in os.getenv("WATCHDOG_DAY_START", "00:00").split(":"))
 
+    # WATCHDOG_CUTOFF is optional: unset means "use the whole watchdog day"
+    # (the class derives the minute before the next day_start). Set it only to
+    # give up earlier than the day boundary.
     kwargs = {}
     cutoff_env = os.getenv("WATCHDOG_CUTOFF")
     if cutoff_env:
@@ -83,14 +85,8 @@ def main() -> None:
     # scheduler.add_job(weekly_job, "cron", day_of_week="sun", hour=3, id="weekly")
     # scheduler.add_job(monthly_job, "cron", day=1, hour=4, id="monthly")
 
-    log.info(
-        "Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%02d:%02d).",
-        tz,
-        dh,
-        dm,
-        hh,
-        mm,
-    )
+    log.info("Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s).",
+             tz, dh, dm, watchdog._cutoff.strftime("%H:%M"))
     scheduler.start()
 
 
