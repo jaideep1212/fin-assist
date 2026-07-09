@@ -11,6 +11,7 @@ The output is the ground truth the loaders in app/data_access.py should be wired
 to (open item #1). Paste it back so the provisional table/column guesses — and
 the placeholder schema.sql — can be replaced with the real thing.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import inspect, text
@@ -37,7 +38,9 @@ def _row_count(engine, schema: str | None, table: str) -> str:
     ident = f'"{schema}"."{table}"' if schema else f'"{table}"'
     try:
         with engine.connect() as conn:
-            return f"{conn.execute(text(f'SELECT count(*) FROM {ident}')).scalar_one():,}"
+            return (
+                f"{conn.execute(text(f'SELECT count(*) FROM {ident}')).scalar_one():,}"
+            )
     except Exception as exc:  # keep going even if one table can't be counted
         return f"(count failed: {exc.__class__.__name__})"
 

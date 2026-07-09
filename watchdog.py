@@ -18,6 +18,7 @@ Once DONE or MISSED, ticks are no-ops until the next day_start. Dependencies
 (clock, awake-check, job) are injected so this is unit-testable without a
 database or real time.
 """
+
 from __future__ import annotations
 
 import enum
@@ -55,9 +56,12 @@ class DailyWatchdog:
         # 16:00 -> 15:59), so the give-up time can't silently contradict the
         # day boundary. Pass an explicit cutoff only to give up *earlier*.
         if cutoff is None:
-            anchor = datetime(2000, 1, 1)  # arbitrary safe date; avoids min/max overflow
-            cutoff = (datetime.combine(anchor.date(), day_start)
-                      - timedelta(minutes=1)).time()
+            anchor = datetime(
+                2000, 1, 1
+            )  # arbitrary safe date; avoids min/max overflow
+            cutoff = (
+                datetime.combine(anchor.date(), day_start) - timedelta(minutes=1)
+            ).time()
         self._cutoff = cutoff
         self._tz = ZoneInfo(tz)
         self._clock = clock or (lambda: datetime.now(self._tz))
@@ -67,7 +71,7 @@ class DailyWatchdog:
     def _day_start_dt(self, now: datetime) -> datetime:
         """The instant at which the current watchdog day began (always <= now)."""
         start = datetime.combine(now.date(), self._day_start, tzinfo=self._tz)
-        if now < start:               # before today's boundary -> day began yesterday
+        if now < start:  # before today's boundary -> day began yesterday
             start -= timedelta(days=1)
         return start
 
@@ -86,7 +90,9 @@ class DailyWatchdog:
     def tick(self) -> State:
         now = self._clock()
         day_start_dt = self._day_start_dt(now)
-        logical_date = day_start_dt.date()   # identifies the watchdog day by its start date
+        logical_date = (
+            day_start_dt.date()
+        )  # identifies the watchdog day by its start date
 
         # New watchdog day: re-arm.
         if logical_date != self._run_date:
@@ -101,8 +107,9 @@ class DailyWatchdog:
         # Ran out of the day's window.
         if now >= self._cutoff_dt(day_start_dt):
             self.state = State.MISSED
-            log.warning("Cutoff reached; no successful run for watchdog day %s.",
-                        self._run_date)
+            log.warning(
+                "Cutoff reached; no successful run for watchdog day %s.", self._run_date
+            )
             return self.state
 
         # Not reachable yet — try again next tick.
