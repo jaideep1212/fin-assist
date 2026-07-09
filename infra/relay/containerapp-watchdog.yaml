@@ -9,7 +9,7 @@
 # and add ingress. Both apps that touch the DB carry their own azbridge sidecar.
 
 properties:
-  managedEnvironmentId: /subscriptions/2430b6d8-388d-444f-b179-9bf8a92e9955/resourcegroups/fin-assist-rg/providers/Microsoft.App/managedEnvironments/fin-assist-cae
+  managedEnvironmentId: /subscriptions/<SUBSCRIPTION_ID>/resourcegroups/fin-assist-rg/providers/Microsoft.App/managedEnvironments/fin-assist-cae
   configuration:
     secrets:
       - name: db-url
