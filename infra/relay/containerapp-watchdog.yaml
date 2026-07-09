@@ -15,9 +15,9 @@ properties:
       - name: db-url
         value: "postgresql://<PG_DB_USERNAME>:<PG_DB_PASSWORD>@127.0.0.1:5432/<PG_DB_NAME>"
       - name: relay-send-connstr
-        value: "<AZURE_SEND_CONN_STR>"
+        value: <AZURE_SEND_CONN_STR>
       - name: acr-password
-        value: "<ACR_PASSWORD>"
+        value: <ACR_PASSWORD>
     registries:
       - server: finassistacr.azurecr.io
         username: finassistacr
@@ -49,4 +49,4 @@ properties:
           - name: RELAY_NAMESPACE
             value: "fin-assist-relay"
           - name: RELAY_SEND_CONNSTR
-            secretRef: "<AZURE_SEND_CONN_STR>"
+            secretRef: <AZURE_SEND_CONN_STR>
