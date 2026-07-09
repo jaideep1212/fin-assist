@@ -1,0 +1,29 @@
+# azbridge sidecar for the Azure side (LOCAL forwarder / sender).
+# Binds 127.0.0.1:5432 inside the Container App replica and tunnels it to the
+# Pi through the 'pgdb' hybrid connection. The app container reaches it on
+# localhost because containers in one Container Apps replica share the network.
+#
+# azbridge is open-source and NOT covered by Microsoft support - pin a release.
+# Grab the current linux-x64 asset URL from:
+#   https://github.com/Azure/azure-relay-bridge/releases
+# and pass it as a build arg so the version is explicit and reproducible.
+
+FROM debian:12-slim
+
+ARG AZBRIDGE_URL="https://github.com/Azure/azure-relay-bridge/releases/download/v0.16.1/azbridge.0.16.1.linux-x64.tar.gz"
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/azbridge \
+    && curl -fsSL "$AZBRIDGE_URL" -o /tmp/azbridge.tar.gz \
+    && tar -xzf /tmp/azbridge.tar.gz -C /opt/azbridge \
+    && rm /tmp/azbridge.tar.gz
+
+ENV PATH="/opt/azbridge:${PATH}"
+
+# Local forwarder: bind 127.0.0.1:5432 and forward to the 'pgdb' hybrid
+# connection. -L expression is  [host:]port:relay_name  (relay name LAST).
+# Use ONLY -x with the connection string: it already contains the endpoint, so
+# passing -e as well causes azbridge to start but never bind. RELAY_SEND_CONNSTR
+# is injected as a Container Apps secret (send-only SAS).
+CMD ["/bin/sh", "-c", "azbridge -L 127.0.0.1:5432:pgdb -x \"$RELAY_SEND_CONNSTR\""]

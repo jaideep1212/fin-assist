@@ -1,0 +1,16 @@
+[Unit]
+Description=azbridge PostgreSQL relay (remote forwarder to Azure Relay)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/azbridge/azbridge -f /etc/azbridge/pi_config.yml
+Restart=always
+RestartSec=5
+# run as a dedicated low-privilege user
+User=azbridge
+Group=azbridge
+
+[Install]
+WantedBy=multi-user.target
