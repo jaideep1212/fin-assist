@@ -20,6 +20,7 @@ Env:
                       WATCHDOG_DAY_START.
   SINK / SINK_ROOT / BLOB_* : see app/sinks.py
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ def build_daily_job(sink: Sink):
         for name, df in frames.items():
             dest = sink.write(name, df, run_date)
             log.info("Wrote %s (%d rows) -> %s", name, len(df), dest)
+
     return job
 
 
@@ -85,8 +87,13 @@ def main() -> None:
     # scheduler.add_job(weekly_job, "cron", day_of_week="sun", hour=3, id="weekly")
     # scheduler.add_job(monthly_job, "cron", day=1, hour=4, id="monthly")
 
-    log.info("Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s).",
-             tz, dh, dm, watchdog._cutoff.strftime("%H:%M"))
+    log.info(
+        "Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s).",
+        tz,
+        dh,
+        dm,
+        watchdog._cutoff.strftime("%H:%M"),
+    )
     scheduler.start()
 
 

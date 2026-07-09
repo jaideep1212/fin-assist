@@ -18,6 +18,8 @@ properties:
         value: <AZURE_SEND_CONN_STR>
       - name: acr-password
         value: <ACR_PASSWORD>
+      - name: blob-conn-str
+        value: <BLOB_CONN_STR>
     registries:
       - server: finassistacr.azurecr.io
         username: finassistacr
@@ -39,9 +41,9 @@ properties:
           - name: WATCHDOG_DAY_START
             value: "16:00"
           - name: SINK
-            value: "local"   # will set it to blob once the test run completes successfully
-          #- name: BLOB_CONN_STR
-          #  secretRef: blob-conn-str
+            value: "blob"   # will set it to blob once the test run completes successfully
+          - name: BLOB_CONN_STR
+            secretRef: blob-conn-str
       - name: azbridge
         image: finassistacr.azurecr.io/azbridge-sidecar:v1
         resources: { cpu: 0.25, memory: 0.5Gi }
