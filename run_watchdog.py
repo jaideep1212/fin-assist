@@ -2,7 +2,7 @@
 Watchdog service entrypoint.
 
 Polls every minute via APScheduler. On the first minute the Pi is reachable
-within the current watchdog day, it fetches the 8 source tables and writes the
+within the current watchdog day, it fetches the source tables and writes the
 daily transient snapshot, then idles until the next day boundary.
 
 Run locally:   python run_watchdog.py
@@ -19,8 +19,12 @@ Env:
                       it is resolved to the first occurrence at or after
                       WATCHDOG_DAY_START.
   SINK / SINK_ROOT / BLOB_* : see app/sinks.py
-"""
 
+  When SINK=blob, a durable "done" marker is written per watchdog day (see
+  app/markers.py). This makes DONE survive restarts/redeploys and lets you
+  force a re-run by deleting/renaming the marker blob. When SINK=local, the
+  watchdog uses in-memory done-state (fine for local dev).
+"""
 from __future__ import annotations
 
 import logging
@@ -30,6 +34,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from app.markers import build_marker
 from app.pi_data import fetch_all, is_pi_awake
 from app.sinks import Sink, build_sink
 from app.watchdog import DailyWatchdog
@@ -43,7 +48,6 @@ def build_daily_job(sink: Sink):
         for name, df in frames.items():
             dest = sink.write(name, df, run_date)
             log.info("Wrote %s (%d rows) -> %s", name, len(df), dest)
-
     return job
 
 
@@ -64,11 +68,15 @@ def main() -> None:
         hh, mm = (int(x) for x in cutoff_env.split(":"))
         kwargs["cutoff"] = dtime(hh, mm)
 
+    # Durable done-marker when SINK=blob; None (in-memory) otherwise.
+    marker = build_marker()
+
     watchdog = DailyWatchdog(
         job=build_daily_job(build_sink()),
         is_awake=is_pi_awake,
         day_start=dtime(dh, dm),
         tz=tz,
+        marker=marker,
         **kwargs,
     )
 
@@ -87,13 +95,9 @@ def main() -> None:
     # scheduler.add_job(weekly_job, "cron", day_of_week="sun", hour=3, id="weekly")
     # scheduler.add_job(monthly_job, "cron", day=1, hour=4, id="monthly")
 
-    log.info(
-        "Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s).",
-        tz,
-        dh,
-        dm,
-        watchdog._cutoff.strftime("%H:%M"),
-    )
+    log.info("Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s, markers=%s).",
+             tz, dh, dm, watchdog._cutoff.strftime("%H:%M"),
+             "on" if marker is not None else "off")
     scheduler.start()
 
 
