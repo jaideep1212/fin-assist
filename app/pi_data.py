@@ -13,7 +13,7 @@ import pandas as pd
 
 from app.db import ping, read_sql
 
-# The 9 source tables on the Pi.
+# The 10 source tables on the Pi.
 DIM_TABLES = [
     "dim_users",
     "dim_users_s",
@@ -26,6 +26,7 @@ FACT_TABLES = [
     "fact_stock_transactions",
     "fact_aliases",
     "fact_account_broker_mappings",
+    "fact_deposits",
 ]
 PI_TABLES = DIM_TABLES + FACT_TABLES
 
