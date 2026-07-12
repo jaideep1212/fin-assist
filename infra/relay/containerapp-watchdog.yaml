@@ -13,7 +13,7 @@ properties:
   configuration:
     secrets:
       - name: db-url
-        value: "postgresql://<PG_DB_USERNAME>:<PG_DB_PASSWORD>@127.0.0.1:5432/<PG_DB_NAME>"
+        value: "postgresql://<PG_USER_PI>:<PG_PASSWORD_PI>@127.0.0.1:5432/<PG_DB_PI>"
       - name: relay-send-connstr
         value: <AZURE_SEND_CONN_STR>
       - name: acr-password
@@ -21,8 +21,8 @@ properties:
       - name: blob-conn-str
         value: <BLOB_CONN_STR>
     registries:
-      - server: finassistacr.azurecr.io
-        username: finassistacr
+      - server: <ACR_NAME>.azurecr.io
+        username: <ACR_NAME>
         passwordSecretRef: acr-password
   template:
     scale:
@@ -30,7 +30,7 @@ properties:
       maxReplicas: 1
     containers:
       - name: watchdog
-        image: finassistacr.azurecr.io/finassist:v1
+        image: <ACR_NAME>.azurecr.io/finassist:v1
         command: ["python", "run_watchdog.py"]
         resources: { cpu: 0.25, memory: 0.5Gi }
         env:
@@ -41,11 +41,11 @@ properties:
           - name: WATCHDOG_DAY_START
             value: "16:00"
           - name: SINK
-            value: "blob"   # will set it to blob once the test run completes successfully
+            value: "blob"
           - name: BLOB_CONN_STR
             secretRef: blob-conn-str
       - name: azbridge
-        image: finassistacr.azurecr.io/azbridge-sidecar:v1
+        image: <ACR_NAME>.azurecr.io/azbridge-sidecar:v1
         resources: { cpu: 0.25, memory: 0.5Gi }
         env:
           - name: RELAY_NAMESPACE
