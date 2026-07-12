@@ -89,7 +89,15 @@ def main() -> None:
     run_date = os.getenv("STAGING_RUN_DATE")
     ddl_path = Path(os.getenv("STAGING_DDL", str(_DDL_DEFAULT)))
 
-    engine = create_engine(url, future=True)
+    try:
+        engine = create_engine(url, future=True)
+    except ModuleNotFoundError as exc:
+        if exc.name == "psycopg2":
+            raise SystemExit(
+                "FATAL: missing Python package 'psycopg2-binary' (module: psycopg2). "
+                "Install runtime deps with `python -m pip install -r requirements.txt`."
+            ) from exc
+        raise
     _run_ddl(engine, ddl_path)
     part = _pick_partition(source, run_date)
     log.info("Loading partition %s", part)
