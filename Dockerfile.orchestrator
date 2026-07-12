@@ -1,0 +1,48 @@
+# Dockerfile.orchestrator
+# ---------------------------------------------------------------------------
+# Job B image: runs run_staging_pipeline.py (apply -> load -> verify -> destroy).
+# Separate from the lean app/watchdog image because it must also carry two
+# non-Python CLIs the orchestrator shells out to:
+#   * Terraform  (terraform apply/output/destroy)
+#   * Azure CLI  (az storage blob ... ; firewall step auto-skips in-container)
+# Run frequently things (watchdog, pytest) stay on the small python:3.12-slim
+# image; this heavier image is used only by the once-a-day job.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim
+
+# Pin the Terraform version so image builds are reproducible. Bump deliberately.
+ARG TERRAFORM_VERSION=1.9.8
+
+WORKDIR /app
+
+# --- system tooling: Terraform + Azure CLI ---------------------------------
+# One RUN layer, cleaned up in the same layer to keep the image smaller.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg unzip; \
+    # Terraform: fetch the pinned linux/amd64 binary into /usr/local/bin
+    curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip; \
+    unzip /tmp/terraform.zip -d /usr/local/bin; \
+    rm /tmp/terraform.zip; \
+    terraform version; \
+    # Azure CLI: official Microsoft install script (Debian/Ubuntu)
+    curl -sL https://aka.ms/InstallAzureCLIDeb | bash; \
+    az version; \
+    # cleanup
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# --- python dependencies (lean; load + verify only) ------------------------
+# Copied first so this layer is cached until the requirements change.
+COPY requirements-orchestrator.txt ./
+RUN pip install --no-cache-dir -r requirements-orchestrator.txt
+
+# --- project code ----------------------------------------------------------
+COPY . .
+
+# The orchestrator IS the entrypoint. The Container App Job appends args, e.g.
+#   --destroy yes   (default), or --post-load "<cmd>", --run-date <YYYY-MM-DD>.
+# Inside Azure the firewall step auto-skips (CONTAINER_APP_NAME is set).
+ENTRYPOINT ["python", "run_staging_pipeline.py"]
+CMD ["--destroy", "yes"]

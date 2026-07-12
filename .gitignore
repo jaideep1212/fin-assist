@@ -18,6 +18,7 @@ venv/
 # ---- Generated output (the CSV goes to Azure, not the repo) ----
 output/
 *.log
+_staging/
 
 # ---- OS / editor cruft ----
 .DS_Store

@@ -1,0 +1,28 @@
+# secrets / local state
+.env
+.git
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# local working dirs & outputs
+_staging/
+decrypted/
+
+# python cruft
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# things the orchestrator image doesn't need
+tests/
+notes/
+jenkins/
+Jenkinsfile
+Dockerfile
+Dockerfile.jenkins
+docker-compose.yml
+*_Dockerfile.orchestrator
+README.md
+RELAY_SETUP.md

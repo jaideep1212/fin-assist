@@ -1,0 +1,20 @@
+# requirements-orchestrator.txt
+# Dependencies for the Job B orchestrator image (run_staging_pipeline.py):
+# the LOAD stage (app/load_staging.py) + the VERIFY stage
+# (app/verify_decrypt_export.py). Deliberately lean -- NO web stack
+# (fastapi/uvicorn) and NO scheduler (apscheduler); those belong to the API and
+# the watchdog, not this job.
+#
+# terraform and the Azure CLI are NOT pip packages -- they are installed in the
+# Dockerfile (Dockerfile.orchestrator).
+
+# --- load stage: app/load_staging.py (pandas -> SQLAlchemy -> psycopg2) ---
+pandas>=2.0
+sqlalchemy>=2.0
+psycopg2-binary>=2.9        # SQLAlchemy's driver for the loader
+pyarrow>=15.0               # read the parquet snapshots
+
+# --- verify stage: app/verify_decrypt_export.py ---
+psycopg[binary]>=3.1        # NOTE: psycopg v3 (import `psycopg`), distinct from
+                            # psycopg2 above. verify uses psycopg/psycopg.errors.
+cryptography>=42.0          # Fernet decryption (was implicit locally; pin it)
