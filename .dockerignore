@@ -16,7 +16,6 @@ __pycache__/
 venv/
 
 # things the orchestrator image doesn't need
-tests/
 notes/
 jenkins/
 Jenkinsfile
