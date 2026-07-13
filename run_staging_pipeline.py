@@ -145,18 +145,24 @@ def _install_scratch_guards() -> None:
 
 
 def _running_in_azure() -> bool:
-    """True when running inside an Azure Container App (Job or app).
+    """True when running inside an Azure Container App or Job.
 
-    Azure Container Apps injects CONTAINER_APP_NAME into every container; it is
-    present in the Job and absent on the laptop. Inside Azure the staging server
-    is already reachable via the Terraform 0.0.0.0 "allow Azure services" rule,
-    and the container's egress IP is not a useful firewall entry -- so the
-    client firewall step is skipped there and kept on the laptop.
+    Container Apps inject platform metadata env vars, but they DIFFER by type:
+    an *app* gets CONTAINER_APP_NAME, while a *job* (what this runs as) gets
+    CONTAINER_APP_JOB_NAME / CONTAINER_APP_JOB_EXECUTION_NAME and NOT
+    CONTAINER_APP_NAME. Checking only CONTAINER_APP_NAME therefore returns False
+    inside a job -- which silently disabled the container-only auth path. Check
+    all three so this is true whether we run as an app or a job.
 
-    NOTE: this detects the Container Apps environment specifically (the intended
-    deployment target), not "any Azure compute".
+    Inside Azure the staging server is already reachable via the Terraform
+    0.0.0.0 "allow Azure services" rule, and the container's egress IP is not a
+    useful firewall entry -- so the client firewall step is skipped there.
     """
-    return bool(os.getenv("CONTAINER_APP_NAME"))
+    return bool(
+        os.getenv("CONTAINER_APP_NAME")
+        or os.getenv("CONTAINER_APP_JOB_NAME")
+        or os.getenv("CONTAINER_APP_JOB_EXECUTION_NAME")
+    )
 
 
 def _resolve_terraform_executable() -> str:
@@ -307,6 +313,25 @@ def run(cmd, *, capture=False, env=None, check=True):
     return proc.stdout.strip() if capture else None
 
 
+# --- azure CLI session isolation -----------------------------------------
+# In the container the az CLI logs in with the managed identity, which presents
+# as a SERVICE PRINCIPAL. Terraform's azurerm auth probes the az CLI whenever it
+# finds a session and rejects a service-principal one ("only supported as a
+# User"). We can't disable that probe on Terraform 1.9.8 (it has no use_cli
+# backend argument, and the backend ignores the ARM_USE_CLI env var). So instead
+# we keep the two apart: the az CLI gets its OWN config dir, and Terraform runs
+# pointed at a SEPARATE EMPTY one -- Terraform then sees no CLI session and uses
+# MSI (via -backend-config=use_msi + ARM_USE_MSI), while az storage keeps its
+# login. Applied only in the container; on the laptop both share your real
+# ~/.azure so your interactive user login still serves az AND terraform.
+_AZ_CLI_CONFIG_DIR = "/tmp/az-cli-config"    # az login + az storage read/write here
+_TF_AZ_CONFIG_DIR = "/tmp/tf-empty-azure"    # terraform reads this (empty) -> no CLI session
+
+# Populated in the container by _ensure_state_access_key(); consumed by tf() as
+# the ARM_ACCESS_KEY env var so the backend authenticates with a storage key.
+_STATE_ACCESS_KEY = None
+
+
 # --- terraform ------------------------------------------------------------
 
 def tf(*args, capture=False):
@@ -321,6 +346,25 @@ def tf(*args, capture=False):
         for k in [key for key in tf_env.keys() if key.lower() == "tf_var_admin_password"]:
             del tf_env[k]
         tf_env["TF_VAR_admin_password"] = tf_pwd
+    if _running_in_azure():
+        # BACKEND auth: the state storage access key (fetched with the MI), passed
+        # as an env var so it never lands in the logs. The backend uses ONLY this
+        # -- no CLI, no MSI -- so the provider settings below don't affect it.
+        if _STATE_ACCESS_KEY:
+            tf_env["ARM_ACCESS_KEY"] = _STATE_ACCESS_KEY
+        # PROVIDER auth (apply/destroy): use the az CLI session that
+        # `az login --identity` established, NOT the provider's own MSI. The
+        # provider's MSI hits the VM IMDS api-version (2018-02-01) that the
+        # Container Apps token endpoint rejects ("UnsupportedApiVersion"), whereas
+        # the az CLI already speaks that endpoint correctly. So point terraform at
+        # the CLI's config dir (which holds the login) and switch it from MSI to
+        # CLI auth. NOTE: the earlier "only supported as a User" rejection was
+        # BACKEND-only (Terraform core's older auth lib); the azurerm v4 provider's
+        # newer auth accepts a managed-identity CLI login.
+        os.makedirs(_AZ_CLI_CONFIG_DIR, exist_ok=True)
+        tf_env["AZURE_CONFIG_DIR"] = _AZ_CLI_CONFIG_DIR
+        tf_env["ARM_USE_MSI"] = "false"
+        tf_env["ARM_USE_CLI"] = "true"
     return run([terraform_exe, f"-chdir={TF_DIR}", *args], capture=capture, env=tf_env)
 
 
@@ -329,7 +373,27 @@ def tf_init():
     # -reconfigure: adopt the current backend config cleanly (the container has
     #   no prior local backend state to migrate).
     # -input=false: never block on interactive prompts inside a container.
-    tf("init", "-reconfigure", "-input=false")
+    init_args = ["init", "-reconfigure", "-input=false"]
+
+    state_key = f"{Path(TF_DIR).name}.tfstate"
+    init_args.append(f"-backend-config=key={state_key}")
+
+    # Backend authentication to the state storage account differs by location:
+    #   * Laptop:    your interactive `az login` (a USER account) provides an
+    #                Entra ID token; use_azuread_auth uses it against the blob.
+    #   * Container: Terraform 1.9.8's backend cannot authenticate to the state
+    #                account with the managed identity -- it resolves the
+    #                subscription tenant via the az CLI, which fails whether the
+    #                CLI holds a managed-identity (SP) session ("only supported as
+    #                a User") or none ("please run az login"). So we bypass all of
+    #                that with a STORAGE ACCESS KEY, fetched at runtime with the
+    #                MI and passed via the ARM_ACCESS_KEY env var in tf() (never on
+    #                the command line, so it isn't logged). No auth backend-config
+    #                is added here in that case.
+    if not _running_in_azure():
+        init_args.append("-backend-config=use_azuread_auth=true")
+
+    tf(*init_args)
 
 
 def tf_apply():
@@ -354,7 +418,79 @@ def tf_destroy():
 
 def az(*args, capture=False):
     az_exe = _resolve_az_executable()
-    return run([az_exe, *args], capture=capture)
+    az_env = os.environ.copy()
+    if _running_in_azure():
+        # Keep the CLI's managed-identity session in its OWN dir, separate from
+        # the empty one terraform reads (see the isolation note above).
+        os.makedirs(_AZ_CLI_CONFIG_DIR, exist_ok=True)
+        az_env["AZURE_CONFIG_DIR"] = _AZ_CLI_CONFIG_DIR
+    return run([az_exe, *args], capture=capture, env=az_env)
+
+
+def _ensure_azure_cli_login():
+    """Sign the az CLI in when running in the container.
+
+    The blob steps below (latest_partition_date + download_partition from the
+    finassistdata account) use `az storage blob ... --auth-mode login`, which
+    needs an authenticated az CLI session. On the laptop that's your manual
+    `az login`. Inside the container there is none, so sign in with the job's
+    USER-ASSIGNED managed identity. (Terraform doesn't need this -- its provider
+    and backend use MSI via IMDS directly -- but the az CLI does.)
+
+    Current az CLI uses --client-id for a user-assigned identity; if the image
+    ships an older az, that flag was --username.
+    """
+    if not _running_in_azure():
+        return
+    client_id = os.getenv("ARM_CLIENT_ID")
+    if not client_id:
+        raise SystemExit(
+            "FATAL: running in Azure but ARM_CLIENT_ID is not set; cannot sign "
+            "the Azure CLI in with the managed identity."
+        )
+    az("login", "--identity", "--client-id", client_id, "--output", "none")
+    sub = os.getenv("ARM_SUBSCRIPTION_ID")
+    if sub:
+        az("account", "set", "--subscription", sub, "--output", "none")
+
+    # Terraform runs pointed at a SEPARATE empty AZURE_CONFIG_DIR (see tf()), so
+    # it won't see this managed-identity CLI session and will use MSI. ARM_USE_CLI
+    # is also set false as harmless belt-and-suspenders for the provider.
+    os.environ["ARM_USE_CLI"] = "false"
+
+
+def _ensure_state_access_key():
+    """Fetch the state storage account key with the managed identity.
+
+    Terraform 1.9.8's azurerm BACKEND can't authenticate to the state account
+    with a managed identity (it resolves the subscription via the az CLI, which a
+    managed-identity session can't satisfy). A storage access key authenticates
+    straight to the blob data plane and sidesteps that entirely. The MI has
+    Contributor on the state RG, so it can list keys. The key is fetched fresh
+    each run, handed to terraform via ARM_ACCESS_KEY (env, never logged), and
+    never persisted. No-op on the laptop, where your az login handles the backend.
+
+    Requires shared-key access to be enabled on the account
+    (allowSharedKeyAccess != false).
+    """
+    global _STATE_ACCESS_KEY
+    if not _running_in_azure():
+        return
+    account = os.getenv("TF_STATE_STORAGE_ACCOUNT", "finassisttfstate")
+    rg = os.getenv("TF_STATE_RESOURCE_GROUP", "fin-assist-rg")
+    _STATE_ACCESS_KEY = az(
+        "storage", "account", "keys", "list",
+        "--account-name", account, "-g", rg,
+        "--query", "[0].value", "-o", "tsv", capture=True,
+    )
+    if not _STATE_ACCESS_KEY:
+        raise SystemExit(
+            f"FATAL: could not fetch an access key for storage account "
+            f"'{account}' in resource group '{rg}'. Check that the account name "
+            f"is right (override with TF_STATE_STORAGE_ACCOUNT / "
+            f"TF_STATE_RESOURCE_GROUP), that the managed identity can listKeys "
+            f"(e.g. Contributor), and that shared-key access is enabled."
+        )
 
 def public_ip(override: str | None) -> str:
     if override:
@@ -473,6 +609,8 @@ def main() -> int:
     _load_dotenv()
     _ensure_tf_password()
     _ensure_python_runtime_deps()
+    _ensure_azure_cli_login()  # in the container, sign az in with the managed identity (no-op on laptop)
+    _ensure_state_access_key()  # fetch the state storage key for the backend (no-op on laptop)
 
     server_created = False
     try:
@@ -548,4 +686,32 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import time
+    import traceback
+
+    _rc = 0
+    try:
+        _rc = main()
+    except SystemExit as _e:
+        # run() raises SystemExit on any failed subprocess; normalise the code.
+        _rc = _e.code if isinstance(_e.code, int) else 1
+    except BaseException:
+        # Surface Python crashes instead of exiting silently (which is what made
+        # the failures invisible in the container logs).
+        traceback.print_exc()
+        _rc = 1
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # Optional keep-alive so a short/failed run stays attachable for log
+        # capture. Set DEBUG_HOLD_SECONDS on the job (e.g. 180) to enable; unset
+        # or 0 = no hold (normal production behaviour).
+        try:
+            _hold = int(os.getenv("DEBUG_HOLD_SECONDS", "0") or "0")
+        except ValueError:
+            _hold = 0
+        if _hold > 0:
+            print(f"[debug] holding {_hold}s for log capture (exit={_rc})", flush=True)
+            time.sleep(_hold)
+
+    sys.exit(_rc)
