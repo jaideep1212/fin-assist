@@ -25,6 +25,7 @@ Env:
   force a re-run by deleting/renaming the marker blob. When SINK=local, the
   watchdog uses in-memory done-state (fine for local dev).
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,6 +49,7 @@ def build_daily_job(sink: Sink):
         for name, df in frames.items():
             dest = sink.write(name, df, run_date)
             log.info("Wrote %s (%d rows) -> %s", name, len(df), dest)
+
     return job
 
 
@@ -95,9 +97,14 @@ def main() -> None:
     # scheduler.add_job(weekly_job, "cron", day_of_week="sun", hour=3, id="weekly")
     # scheduler.add_job(monthly_job, "cron", day=1, hour=4, id="monthly")
 
-    log.info("Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s, markers=%s).",
-             tz, dh, dm, watchdog._cutoff.strftime("%H:%M"),
-             "on" if marker is not None else "off")
+    log.info(
+        "Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s, markers=%s).",
+        tz,
+        dh,
+        dm,
+        watchdog._cutoff.strftime("%H:%M"),
+        "on" if marker is not None else "off",
+    )
     scheduler.start()
 
 

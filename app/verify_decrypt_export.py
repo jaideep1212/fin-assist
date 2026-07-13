@@ -86,30 +86,69 @@ DEFAULT_TF_STAGING_DIR = "infra/staging-db"
 ENCRYPTED_FIELDS = {
     "dim_users": [],
     "dim_users_s": [
-        "first_name", "last_name", "birth_date", "birth_city", "birth_country",
-        "marriage_date", "current_address_line1", "current_address_line2",
-        "current_city", "current_post_code", "current_country",
-        "permanent_address_line1", "permanent_address_line2", "permanent_city",
-        "permanent_post_code", "permanent_country", "contact_email_id",
-        "contact_mobile_no", "contact_phone_no", "work_email_id",
-        "work_mobile_no", "work_phone_no", "expired_date", "pan", "aadhar", "tin",
+        "first_name",
+        "last_name",
+        "birth_date",
+        "birth_city",
+        "birth_country",
+        "marriage_date",
+        "current_address_line1",
+        "current_address_line2",
+        "current_city",
+        "current_post_code",
+        "current_country",
+        "permanent_address_line1",
+        "permanent_address_line2",
+        "permanent_city",
+        "permanent_post_code",
+        "permanent_country",
+        "contact_email_id",
+        "contact_mobile_no",
+        "contact_phone_no",
+        "work_email_id",
+        "work_mobile_no",
+        "work_phone_no",
+        "expired_date",
+        "pan",
+        "aadhar",
+        "tin",
     ],
     "dim_entities": [
-        "entity_name", "entity_branch", "address_line1", "address_line2", "city",
-        "post_code", "country", "customer_care_email_id", "customer_care_phone_no",
-        "customer_care_website", "swift", "ifsc", "micr", "iban",
+        "entity_name",
+        "entity_branch",
+        "address_line1",
+        "address_line2",
+        "city",
+        "post_code",
+        "country",
+        "customer_care_email_id",
+        "customer_care_phone_no",
+        "customer_care_website",
+        "swift",
+        "ifsc",
+        "micr",
+        "iban",
     ],
     "fact_aliases": ["alias_name"],
     "fact_other_contacts": ["contact_value"],
     "fact_account_broker_mappings": [],
     "fact_stock_transactions": ["trade_id", "order_id", "isin", "symbol"],
     "dim_accounts": [
-        "account_no", "first_holder_address", "cif", "open_year", "email_id",
-        "contact_no", "comments",
+        "account_no",
+        "first_holder_address",
+        "cif",
+        "open_year",
+        "email_id",
+        "contact_no",
+        "comments",
     ],
     "fact_deposits": ["deposit_no", "comments"],
     "dim_mutual_funds": [
-        "folio_no", "scheme_name", "isin", "scheme_code", "scheme_category",
+        "folio_no",
+        "scheme_name",
+        "isin",
+        "scheme_code",
+        "scheme_category",
         "comments",
     ],
     "fact_mutual_fund_transactions": ["trade_id", "order_id"],
@@ -132,9 +171,17 @@ HASH_FIELDS = {
 }
 
 DEFAULT_TABLES = [
-    "dim_users", "dim_users_s", "dim_accounts", "dim_entities", "dim_mutual_funds",
-    "fact_account_broker_mappings", "fact_aliases", "fact_deposits",
-    "fact_mutual_fund_transactions", "fact_other_contacts", "fact_stock_transactions",
+    "dim_users",
+    "dim_users_s",
+    "dim_accounts",
+    "dim_entities",
+    "dim_mutual_funds",
+    "fact_account_broker_mappings",
+    "fact_aliases",
+    "fact_deposits",
+    "fact_mutual_fund_transactions",
+    "fact_other_contacts",
+    "fact_stock_transactions",
 ]
 
 
@@ -233,8 +280,10 @@ def build_connection(profile: str):
     sslmode = _cfg("PG_SSLMODE", profile)
     if sslmode:
         kwargs["sslmode"] = sslmode
-    desc = (f"{kwargs['host']}:{kwargs['port']}/{kwargs['dbname']} as "
-            f"{kwargs['user']}" + (f" (sslmode={sslmode})" if sslmode else ""))
+    desc = (
+        f"{kwargs['host']}:{kwargs['port']}/{kwargs['dbname']} as "
+        f"{kwargs['user']}" + (f" (sslmode={sslmode})" if sslmode else "")
+    )
     return (), kwargs, desc
 
 
@@ -250,6 +299,7 @@ def load_key(profile: str) -> Fernet:
 # ===========================================================================
 # Decryption / decoding -- UNCHANGED from the proven tool. Do not modify.
 # ===========================================================================
+
 
 def _decode_sqlserver_text(raw: bytes) -> str:
     """Decode bytes that may be UTF-8 or UTF-16-LE. Entity-side data (NVARCHAR
@@ -350,20 +400,36 @@ def _default_out_dir(profile: str, profile_raw: str) -> Path:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Decrypt PostgreSQL tables to CSV for verification.")
-    ap.add_argument("--profile", required=True,
-                    help="environment / target: Pi | Azure | Local (case-insensitive)")
-    ap.add_argument("--schema", default=None,
-                    help="schema to read (sets search_path). Overrides "
-                         "<PROFILE>_SCHEMA. Use 'staging' for Azure; omit for public.")
-    ap.add_argument("--tables", nargs="*", default=None,
-                    help="tables to export (overrides PG_TABLES_<profile> and the "
-                         "default list).")
-    ap.add_argument("--out", default=None,
-                    help=r"output dir. Default: Pi -> ./decrypted; "
-                         r"Azure/Local -> C:\Scripts\<profile>.")
-    ap.add_argument("--env-file", default=None,
-                    help="explicit path to a .env file (else searched cwd+parents).")
+        description="Decrypt PostgreSQL tables to CSV for verification."
+    )
+    ap.add_argument(
+        "--profile",
+        required=True,
+        help="environment / target: Pi | Azure | Local (case-insensitive)",
+    )
+    ap.add_argument(
+        "--schema",
+        default=None,
+        help="schema to read (sets search_path). Overrides "
+        "<PROFILE>_SCHEMA. Use 'staging' for Azure; omit for public.",
+    )
+    ap.add_argument(
+        "--tables",
+        nargs="*",
+        default=None,
+        help="tables to export (overrides PG_TABLES_<profile> and the default list).",
+    )
+    ap.add_argument(
+        "--out",
+        default=None,
+        help=r"output dir. Default: Pi -> ./decrypted; "
+        r"Azure/Local -> C:\Scripts\<profile>.",
+    )
+    ap.add_argument(
+        "--env-file",
+        default=None,
+        help="explicit path to a .env file (else searched cwd+parents).",
+    )
     args = ap.parse_args()
 
     _load_dotenv(args.env_file or os.environ.get("DOTENV_PATH"))
@@ -374,9 +440,9 @@ def main() -> int:
 
     fernet = load_key(profile)
     tables = _resolve_tables(profile, args.tables)
-    schema = (args.schema
-              or os.environ.get(f"{profile}_SCHEMA")
-              or _cfg("PG_SCHEMA", profile))
+    schema = (
+        args.schema or os.environ.get(f"{profile}_SCHEMA") or _cfg("PG_SCHEMA", profile)
+    )
 
     out_dir = Path(args.out) if args.out else _default_out_dir(profile, profile_raw)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -392,7 +458,9 @@ def main() -> int:
         conn.autocommit = True  # read-only; keeps search_path + survives a skip
         with conn.cursor() as cur:
             if schema:
-                cur.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+                cur.execute(
+                    sql.SQL("SET search_path TO {}").format(sql.Identifier(schema))
+                )
                 print(f"search_path = {schema}")
             for t in tables:
                 result = export_table(cur, t, fernet, out_dir)
@@ -407,21 +475,30 @@ def main() -> int:
         p = out_dir / f"{t}_decrypted.csv"
         if p.exists():
             text = p.read_text(encoding="utf-8-sig")
-            c = (text.count("<DECRYPT-FAILED") + text.count("<DECRYPT-ERROR")
-                 + text.count("<NON-UTF8-BYTES"))
+            c = (
+                text.count("<DECRYPT-FAILED")
+                + text.count("<DECRYPT-ERROR")
+                + text.count("<NON-UTF8-BYTES")
+            )
             fail_markers += c
             if c:
-                print(f"  WARNING: {p.name} has {c} decrypt-failure marker(s) "
-                      f"- the data may have corrupted bytes!")
+                print(
+                    f"  WARNING: {p.name} has {c} decrypt-failure marker(s) "
+                    f"- the data may have corrupted bytes!"
+                )
 
     print(f"\ndone: {total} row(s) across {processed} table(s) -> {out_dir}")
     if skipped:
         print(f"SKIPPED (not present in target): {', '.join(skipped)}")
     if fail_markers:
-        print(f"RESULT: {fail_markers} value(s) failed to decrypt. Integrity NOT confirmed.")
+        print(
+            f"RESULT: {fail_markers} value(s) failed to decrypt. Integrity NOT confirmed."
+        )
         return 1
-    print("RESULT: all encrypted values decrypted cleanly. Copy is byte-perfect "
-          "and downstream-usable.")
+    print(
+        "RESULT: all encrypted values decrypted cleanly. Copy is byte-perfect "
+        "and downstream-usable."
+    )
     return 0
 
 

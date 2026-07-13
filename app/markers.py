@@ -22,6 +22,7 @@ Manual override (force a re-run of a day):
       --name "_state/done-2026-07-10.json" --auth-mode login
   # or "rename" (copy to an archive name, then delete) to keep an audit trail
 """
+
 from __future__ import annotations
 
 import json
@@ -58,8 +59,11 @@ class BlobMarkerStore:
             client = self._svc.get_blob_client(self._container, name)
             return client.exists()
         except Exception:
-            log.warning("Marker read failed for %s; failing open (will run).",
-                        name, exc_info=True)
+            log.warning(
+                "Marker read failed for %s; failing open (will run).",
+                name,
+                exc_info=True,
+            )
             return False
 
     def mark_done(self, logical_day: date, meta: Optional[dict] = None) -> None:
@@ -79,8 +83,9 @@ class BlobMarkerStore:
         except Exception:
             # Non-fatal: the run itself succeeded. Worst case a later restart
             # re-runs the day (harmless overwrite of the same partition).
-            log.warning("Failed to write done-marker %s (non-fatal).", name,
-                        exc_info=True)
+            log.warning(
+                "Failed to write done-marker %s (non-fatal).", name, exc_info=True
+            )
 
 
 def build_marker() -> Optional[BlobMarkerStore]:
@@ -91,7 +96,7 @@ def build_marker() -> Optional[BlobMarkerStore]:
     if os.getenv("SINK", "local").lower() != "blob":
         log.info("SINK is not 'blob'; watchdog will use in-memory done-state.")
         return None
-    conn = os.environ["BLOB_CONN_STR"]                       # required in blob mode
+    conn = os.environ["BLOB_CONN_STR"]  # required in blob mode
     container = os.getenv("BLOB_CONTAINER", "staging")
     log.info("Done-markers enabled at %s/%s/done-<day>.json", container, _STATE_PREFIX)
     return BlobMarkerStore(conn, container)
