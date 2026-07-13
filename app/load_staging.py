@@ -18,6 +18,7 @@ Env:
   STAGING_RUN_DATE       YYYY-MM-DD (defaults to latest dt= partition found)
   STAGING_DDL            path to staging_ddl.sql (default: alongside this file)
 """
+
 from __future__ import annotations
 
 import logging
@@ -71,9 +72,12 @@ def load_partition(engine, part_dir: Path) -> dict[str, int]:
             df.to_sql(table, engine, schema=_SCHEMA, if_exists="append", index=False)
         else:
             # No explicit DDL (e.g. dim_entities) -> auto-create from parquet.
-            log.warning("No DDL for %s.%s; auto-creating from parquet (types "
-                        "are pandas-inferred). Add real DDL when possible.",
-                        _SCHEMA, table)
+            log.warning(
+                "No DDL for %s.%s; auto-creating from parquet (types "
+                "are pandas-inferred). Add real DDL when possible.",
+                _SCHEMA,
+                table,
+            )
             df.to_sql(table, engine, schema=_SCHEMA, if_exists="replace", index=False)
 
         results[table] = len(df)
@@ -82,8 +86,9 @@ def load_partition(engine, part_dir: Path) -> dict[str, int]:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     url = os.environ["STAGING_DATABASE_URL"]
     source = Path(os.environ.get("STAGING_SOURCE", "./_staging"))
     run_date = os.getenv("STAGING_RUN_DATE")

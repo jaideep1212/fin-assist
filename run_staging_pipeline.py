@@ -60,6 +60,7 @@ The client firewall rule is added only when running on the laptop. Inside an
 Azure Container App (detected via CONTAINER_APP_NAME) it is skipped, since the
 allow-Azure firewall rule already permits the connection.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -186,7 +187,10 @@ def _resolve_terraform_executable() -> str:
         return from_path
 
     candidates = [
-        Path(os.getenv("ProgramFiles", "")) / "HashiCorp" / "Terraform" / "terraform.exe",
+        Path(os.getenv("ProgramFiles", ""))
+        / "HashiCorp"
+        / "Terraform"
+        / "terraform.exe",
         Path(os.getenv("ProgramFiles", "")) / "Terraform" / "terraform.exe",
         Path(os.getenv("ChocolateyInstall", "")) / "bin" / "terraform.exe",
     ]
@@ -213,15 +217,27 @@ def _resolve_az_executable() -> str:
     if override:
         if Path(override).is_file():
             return override
-        raise SystemExit(f"FATAL: AZ_BIN is set but does not point to a file: {override}")
+        raise SystemExit(
+            f"FATAL: AZ_BIN is set but does not point to a file: {override}"
+        )
 
     from_path = shutil.which("az")
     if from_path:
         return from_path
 
     candidates = [
-        Path(os.getenv("ProgramFiles(x86)", "")) / "Microsoft SDKs" / "Azure" / "CLI2" / "wbin" / "az.cmd",
-        Path(os.getenv("ProgramFiles", "")) / "Microsoft SDKs" / "Azure" / "CLI2" / "wbin" / "az.cmd",
+        Path(os.getenv("ProgramFiles(x86)", ""))
+        / "Microsoft SDKs"
+        / "Azure"
+        / "CLI2"
+        / "wbin"
+        / "az.cmd",
+        Path(os.getenv("ProgramFiles", ""))
+        / "Microsoft SDKs"
+        / "Azure"
+        / "CLI2"
+        / "wbin"
+        / "az.cmd",
         Path(os.getenv("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps" / "az.cmd",
         Path(os.getenv("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps" / "az.exe",
     ]
@@ -291,7 +307,9 @@ def _ensure_python_runtime_deps():
         "psycopg2": "psycopg2-binary",
         "pyarrow": "pyarrow",
     }
-    missing = [pkg for mod, pkg in required.items() if importlib.util.find_spec(mod) is None]
+    missing = [
+        pkg for mod, pkg in required.items() if importlib.util.find_spec(mod) is None
+    ]
     if missing:
         missing_list = ", ".join(sorted(missing))
         raise SystemExit(
@@ -324,8 +342,10 @@ def run(cmd, *, capture=False, env=None, check=True):
 # MSI (via -backend-config=use_msi + ARM_USE_MSI), while az storage keeps its
 # login. Applied only in the container; on the laptop both share your real
 # ~/.azure so your interactive user login still serves az AND terraform.
-_AZ_CLI_CONFIG_DIR = "/tmp/az-cli-config"    # az login + az storage read/write here
-_TF_AZ_CONFIG_DIR = "/tmp/tf-empty-azure"    # terraform reads this (empty) -> no CLI session
+_AZ_CLI_CONFIG_DIR = "/tmp/az-cli-config"  # az login + az storage read/write here
+_TF_AZ_CONFIG_DIR = (
+    "/tmp/tf-empty-azure"  # terraform reads this (empty) -> no CLI session
+)
 
 # Populated in the container by _ensure_state_access_key(); consumed by tf() as
 # the ARM_ACCESS_KEY env var so the backend authenticates with a storage key.
@@ -333,6 +353,7 @@ _STATE_ACCESS_KEY = None
 
 
 # --- terraform ------------------------------------------------------------
+
 
 def tf(*args, capture=False):
     terraform_exe = _resolve_terraform_executable()
@@ -343,7 +364,9 @@ def tf(*args, capture=False):
             tf_pwd = v
             break
     if tf_pwd:
-        for k in [key for key in tf_env.keys() if key.lower() == "tf_var_admin_password"]:
+        for k in [
+            key for key in tf_env.keys() if key.lower() == "tf_var_admin_password"
+        ]:
             del tf_env[k]
         tf_env["TF_VAR_admin_password"] = tf_pwd
     if _running_in_azure():
@@ -416,6 +439,7 @@ def tf_destroy():
 
 # --- azure: firewall + blob ----------------------------------------------
 
+
 def az(*args, capture=False):
     az_exe = _resolve_az_executable()
     az_env = os.environ.copy()
@@ -479,9 +503,19 @@ def _ensure_state_access_key():
     account = os.getenv("TF_STATE_STORAGE_ACCOUNT", "finassisttfstate")
     rg = os.getenv("TF_STATE_RESOURCE_GROUP", "fin-assist-rg")
     _STATE_ACCESS_KEY = az(
-        "storage", "account", "keys", "list",
-        "--account-name", account, "-g", rg,
-        "--query", "[0].value", "-o", "tsv", capture=True,
+        "storage",
+        "account",
+        "keys",
+        "list",
+        "--account-name",
+        account,
+        "-g",
+        rg,
+        "--query",
+        "[0].value",
+        "-o",
+        "tsv",
+        capture=True,
     )
     if not _STATE_ACCESS_KEY:
         raise SystemExit(
@@ -492,11 +526,15 @@ def _ensure_state_access_key():
             f"(e.g. Contributor), and that shared-key access is enabled."
         )
 
+
 def public_ip(override: str | None) -> str:
     if override:
         return override
-    for svc in ("https://api.ipify.org", "https://ifconfig.me/ip",
-                "https://checkip.amazonaws.com"):
+    for svc in (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://checkip.amazonaws.com",
+    ):
         try:
             with urllib.request.urlopen(svc, timeout=10) as r:
                 ip = r.read().decode().strip()
@@ -509,24 +547,45 @@ def public_ip(override: str | None) -> str:
 
 def server_name_from_url(url: str) -> str:
     host = urlparse(url).hostname or ""
-    return host.split(".")[0]   # <server>.postgres.database.azure.com
+    return host.split(".")[0]  # <server>.postgres.database.azure.com
 
 
 def add_firewall_rule(server: str, ip: str):
     az(
-        "postgres", "flexible-server", "firewall-rule", "create",
-        "--resource-group", RG, "--server-name", server,
-        "--name", "orchestrator-client",
-        "--start-ip-address", ip, "--end-ip-address", ip,
+        "postgres",
+        "flexible-server",
+        "firewall-rule",
+        "create",
+        "--resource-group",
+        RG,
+        "--server-name",
+        server,
+        "--name",
+        "orchestrator-client",
+        "--start-ip-address",
+        ip,
+        "--end-ip-address",
+        ip,
     )
 
 
 def latest_partition_date() -> str:
     out = az(
-        "storage", "blob", "list",
-        "--account-name", ACCOUNT, "--container-name", CONTAINER,
-        "--prefix", f"{BLOB_PREFIX}/dt=", "--auth-mode", "login",
-        "--query", "[].name", "-o", "tsv",
+        "storage",
+        "blob",
+        "list",
+        "--account-name",
+        ACCOUNT,
+        "--container-name",
+        CONTAINER,
+        "--prefix",
+        f"{BLOB_PREFIX}/dt=",
+        "--auth-mode",
+        "login",
+        "--query",
+        "[].name",
+        "-o",
+        "tsv",
         capture=True,
     )
     dates = sorted(set(re.findall(r"dt=(\d{4}-\d{2}-\d{2})", out or "")))
@@ -545,13 +604,21 @@ def download_partition(run_date: str, workdir: Path) -> Path:
         shutil.rmtree(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     az(
-        "storage", "blob", "download-batch",
-        "--account-name", ACCOUNT, "--source", CONTAINER,
-        "--destination", str(workdir),
-        "--pattern", f"{BLOB_PREFIX}/dt={run_date}/*",
-        "--auth-mode", "login",
+        "storage",
+        "blob",
+        "download-batch",
+        "--account-name",
+        ACCOUNT,
+        "--source",
+        CONTAINER,
+        "--destination",
+        str(workdir),
+        "--pattern",
+        f"{BLOB_PREFIX}/dt={run_date}/*",
+        "--auth-mode",
+        "login",
     )
-    source = workdir / BLOB_PREFIX          # contains dt=<date>/
+    source = workdir / BLOB_PREFIX  # contains dt=<date>/
     part = source / f"dt={run_date}"
     if not part.is_dir() or not any(part.glob("*.parquet")):
         raise SystemExit(
@@ -562,8 +629,8 @@ def download_partition(run_date: str, workdir: Path) -> Path:
 
 def contract_env(url: str, run_date: str, source: Path) -> dict:
     env = os.environ.copy()
-    env["STAGING_DATABASE_URL"] = url        # load_staging.py reads this
-    env["PG_URL_AZURE"] = url                # verify reads this first (skips re-fetch)
+    env["STAGING_DATABASE_URL"] = url  # load_staging.py reads this
+    env["PG_URL_AZURE"] = url  # verify reads this first (skips re-fetch)
     env["STAGING_SCHEMA"] = "staging"
     env["AZURE_SCHEMA"] = "staging"
     env["STAGING_RUN_DATE"] = run_date
@@ -573,20 +640,36 @@ def contract_env(url: str, run_date: str, source: Path) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Azure staging pipeline orchestrator.")
-    ap.add_argument("--destroy", choices=["yes", "no"], default="yes",
-                    help="destroy the staging server at the end. Default yes "
-                         "(also destroys if the flag is omitted). 'no' keeps it.")
-    ap.add_argument("--run-date", default=None,
-                    help="dt= partition (YYYY-MM-DD). Default: latest in blob.")
-    ap.add_argument("--post-load", default=None,
-                    help="command to run after load (pluggable). Default: verify "
-                         "script. Pass 'none' to skip.")
-    ap.add_argument("--client-ip", default=None,
-                    help="public IP to allow through the firewall (default auto).")
-    ap.add_argument("--workdir", default="./_staging",
-                    help="local dir to download parquet into (default ./_staging; "
-                         "add it to .gitignore and .dockerignore). It is always "
-                         "removed after the run -- it holds a disk copy of the data.")
+    ap.add_argument(
+        "--destroy",
+        choices=["yes", "no"],
+        default="yes",
+        help="destroy the staging server at the end. Default yes "
+        "(also destroys if the flag is omitted). 'no' keeps it.",
+    )
+    ap.add_argument(
+        "--run-date",
+        default=None,
+        help="dt= partition (YYYY-MM-DD). Default: latest in blob.",
+    )
+    ap.add_argument(
+        "--post-load",
+        default=None,
+        help="command to run after load (pluggable). Default: verify "
+        "script. Pass 'none' to skip.",
+    )
+    ap.add_argument(
+        "--client-ip",
+        default=None,
+        help="public IP to allow through the firewall (default auto).",
+    )
+    ap.add_argument(
+        "--workdir",
+        default="./_staging",
+        help="local dir to download parquet into (default ./_staging; "
+        "add it to .gitignore and .dockerignore). It is always "
+        "removed after the run -- it holds a disk copy of the data.",
+    )
     args = ap.parse_args()
 
     # Scratch dir for the downloaded parquet (load_staging reads local files, so
@@ -621,8 +704,10 @@ def main() -> int:
         print(f"staging server: {server}")
 
         if _running_in_azure():
-            print("running in Azure (CONTAINER_APP_NAME set) - skipping client "
-                  "firewall rule; the allow-Azure rule already permits this.")
+            print(
+                "running in Azure (CONTAINER_APP_NAME set) - skipping client "
+                "firewall rule; the allow-Azure rule already permits this."
+            )
         else:
             ip = public_ip(args.client_ip)
             print(f"allowing client IP {ip} through the firewall")
@@ -634,7 +719,7 @@ def main() -> int:
 
         env = contract_env(url, run_date, source)
 
-        run(DEFAULT_LOAD_CMD, env=env)                       # MANDATORY
+        run(DEFAULT_LOAD_CMD, env=env)  # MANDATORY
 
         # The parquet on disk has done its job the moment the load succeeds
         # (the data is now in the staging DB). Purge it IMMEDIATELY to minimise
@@ -647,11 +732,13 @@ def main() -> int:
         # staging DB stays alive for the whole downstream step (even if that
         # step is a separate container/job the command starts and blocks on).
         if not post_load or post_load.strip().lower() in ("none", ""):
-            print("WARNING: no post-load script configured (POST_LOAD_CMD unset) "
-                  "- nothing to run against the loaded data. The tables remain "
-                  "loaded in the staging DB; run verification manually if needed "
-                  "(python app/verify_decrypt_export.py --profile Azure) while "
-                  "the server is up.")
+            print(
+                "WARNING: no post-load script configured (POST_LOAD_CMD unset) "
+                "- nothing to run against the loaded data. The tables remain "
+                "loaded in the staging DB; run verification manually if needed "
+                "(python app/verify_decrypt_export.py --profile Azure) while "
+                "the server is up."
+            )
         else:
             print(f"running post-load step (waiting for completion): {post_load}")
             run(post_load, env=env)
