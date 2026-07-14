@@ -4,6 +4,14 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+.env.*
+*.env
+*.key
+*.pem
+*credentials*
+secrets/
+*.tfvars
+*.tfvars.json
 
 # local working dirs & outputs
 _staging/
@@ -25,3 +33,5 @@ docker-compose.yml
 *_Dockerfile.orchestrator
 README.md
 RELAY_SETUP.md
+redaction_patterns.md
+infra/relay/

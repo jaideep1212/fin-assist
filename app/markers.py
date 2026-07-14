@@ -26,12 +26,13 @@ Manual override (force a re-run of a day):
 from __future__ import annotations
 
 import json
-import logging
 import os
 from datetime import date, datetime, timezone
 from typing import Optional
 
-log = logging.getLogger("watchdog.markers")
+from app.obs_logging import get_logger
+
+log = get_logger("watchdog.markers")
 
 _STATE_PREFIX = "_state"
 
@@ -60,8 +61,8 @@ class BlobMarkerStore:
             return client.exists()
         except Exception:
             log.warning(
-                "Marker read failed for %s; failing open (will run).",
-                name,
+                f"marker read failed for {name}; failing open (will run)",
+                extra={"fields": {"event": "marker_read", "status": "error"}},
                 exc_info=True,
             )
             return False
@@ -79,12 +80,29 @@ class BlobMarkerStore:
         try:
             client = self._svc.get_blob_client(self._container, name)
             client.upload_blob(json.dumps(body, indent=2).encode(), overwrite=True)
-            log.info("Wrote done-marker %s.", name)
+            log.info(
+                f"wrote done-marker {name}",
+                extra={
+                    "fields": {
+                        "event": "marker_written",
+                        "status": "ok",
+                        "run_date": logical_day.isoformat(),
+                    }
+                },
+            )
         except Exception:
             # Non-fatal: the run itself succeeded. Worst case a later restart
             # re-runs the day (harmless overwrite of the same partition).
             log.warning(
-                "Failed to write done-marker %s (non-fatal).", name, exc_info=True
+                f"failed to write done-marker {name} (non-fatal)",
+                extra={
+                    "fields": {
+                        "event": "marker_write",
+                        "status": "error",
+                        "run_date": logical_day.isoformat(),
+                    }
+                },
+                exc_info=True,
             )
 
 
@@ -94,9 +112,15 @@ def build_marker() -> Optional[BlobMarkerStore]:
     Reuses the same env the blob sink uses: BLOB_CONN_STR and BLOB_CONTAINER.
     """
     if os.getenv("SINK", "local").lower() != "blob":
-        log.info("SINK is not 'blob'; watchdog will use in-memory done-state.")
+        log.info(
+            "SINK is not 'blob'; watchdog will use in-memory done-state",
+            extra={"fields": {"event": "markers_disabled", "status": "ok"}},
+        )
         return None
     conn = os.environ["BLOB_CONN_STR"]  # required in blob mode
     container = os.getenv("BLOB_CONTAINER", "staging")
-    log.info("Done-markers enabled at %s/%s/done-<day>.json", container, _STATE_PREFIX)
+    log.info(
+        f"done-markers enabled at {container}/{_STATE_PREFIX}/done-<day>.json",
+        extra={"fields": {"event": "markers_enabled", "status": "ok"}},
+    )
     return BlobMarkerStore(conn, container)
