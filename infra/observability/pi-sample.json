@@ -1,0 +1,10 @@
+[
+  {
+    "TimeGenerated": "2026-07-14T10:00:00Z",
+    "host": "pi",
+    "unit": "azbridge-pi.service",
+    "level": "info",
+    "event": "relay_status",
+    "message": "relay connected"
+  }
+]
