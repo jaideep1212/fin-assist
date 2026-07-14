@@ -1,0 +1,127 @@
+// config.alloy  --  Grafana Alloy on the Raspberry Pi.
+// Repo path: infra/observability/config.alloy   (safe to commit: rules only,
+// no address, no secrets -- the Loki address is read from the environment.)
+//
+// Plain-words summary of what this file tells Alloy to do:
+//   1. PICK UP  the Pi's service logs from journald (systemd's logbook).
+//   2. LABEL    each log with where it came from (host=pi, the unit, the level).
+//   3. BLACK OUT any secret/PII shapes that slip through (the backstop).
+//   4. SEND     the cleaned logs to Loki, whose address it reads from the
+//               LOKI_ENDPOINT environment variable (kept on the Pi, never here).
+//
+// Validate after editing:  alloy fmt config.alloy
+// Test in foreground:      alloy run config.alloy   (Ctrl-C to stop)
+
+// -----------------------------------------------------------------------------
+// 1. PICK UP: read journald. We match ONLY the units we care about, so we don't
+//    sweep up unrelated system logs from the box that holds the financial data.
+//    Add more "matches" lines as you add services worth shipping.
+// -----------------------------------------------------------------------------
+loki.source.journal "pi" {
+  max_age = "12h"                                  // on restart, look back at most 12h
+  matches = "_SYSTEMD_UNIT=azbridge-pi.service"    // only the relay's logs (add units as needed)
+
+  labels = {
+    host = "pi",              // which tier: this is the Pi
+    job  = "pi-services",     // a coarse bucket for querying
+  }
+
+  relabel_rules = loki.relabel.journal.rules       // adds unit/level labels (below)
+  forward_to    = [loki.process.redact.receiver]   // hand off to the black-out step
+}
+
+// 2. LABEL: promote a couple of journald fields to real labels so you can filter
+//    in Grafana by service and severity. Labels are metadata, NOT log content.
+loki.relabel "journal" {
+  forward_to = []   // this block only defines rules; it doesn't forward anything itself
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"           // e.g. unit="azbridge-pi.service"
+  }
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"          // e.g. level="info" / "err"
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 3. BLACK OUT: the redaction BACKSTOP. Primary redaction is source-side
+//    (app/obs_logging.py); this catches secrets in third-party / OS / relay logs
+//    that never went through our Python. One stage.replace per pattern -- keep in
+//    sync with redaction_patterns.md and app/obs_logging.py (edit all three
+//    together). RE2 regex (Go). Test each against real sample lines.
+// -----------------------------------------------------------------------------
+loki.process "redact" {
+  // DB URLs with inline creds: postgres://user:pass@host/db
+  stage.replace {
+    expression = "([a-zA-Z][a-zA-Z0-9+.\\-]*://[^\\s:/@]+:[^\\s:/@]+@\\S+)"
+    replace    = "***REDACTED_URL***"
+  }
+  // Azure conn-string key parts (AccountKey / SharedAccessKey / SAS 'sig')
+  stage.replace {
+    expression = "(?i)(AccountKey|SharedAccessKey|SharedAccessSignature|sig)=[^\\s;&\"']+"
+    replace    = "${1}=***REDACTED***"
+  }
+  // Storage conn-string prefix
+  stage.replace {
+    expression = "(?i)DefaultEndpointsProtocol=[^\\s\"']+"
+    replace    = "***REDACTED_CONNSTR***"
+  }
+  // Relay / Service Bus conn parts (this is where the azbridge SAS would show up)
+  stage.replace {
+    expression = "(?i)(Endpoint|EntityPath|SharedAccessKeyName)=[^\\s;\"']+"
+    replace    = "${1}=***REDACTED***"
+  }
+  // SAS query params (?sig=, &sv=, &se=, ...)
+  stage.replace {
+    expression = "(?i)[?&]s(ig|v|p|e|t|r)=[^\\s&\"']+"
+    replace    = "***REDACTED_SAS***"
+  }
+  // Fernet key (44-char urlsafe b64 ending '=')
+  stage.replace {
+    expression = "([A-Za-z0-9\\-_]{43}=)"
+    replace    = "***REDACTED_KEY***"
+  }
+  // JWT
+  stage.replace {
+    expression = "(eyJ[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+\\.[A-Za-z0-9_\\-]+)"
+    replace    = "***REDACTED_JWT***"
+  }
+  // Named secret KEY=value (PGPASSWORD, ENCRYPTION_KEY, tokens, ...)
+  stage.replace {
+    expression = "(?i)(PGPASSWORD|TF_VAR_ADMIN_PASSWORD|ENCRYPTION_KEY|BLOB_CONN_STR|ARM_ACCESS_KEY|ARM_CLIENT_SECRET|password|passwd|secret|token|api[_-]?key)\\s*[=:]\\s*[^\\s,;\"']+"
+    replace    = "${1}=***REDACTED***"
+  }
+  // Email (PII)
+  stage.replace {
+    expression = "([A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,})"
+    replace    = "***REDACTED_EMAIL***"
+  }
+  // Long digit runs (account/card/phone-ish). 9+ to spare dates/small counts.
+  stage.replace {
+    expression = "(\\d{9,})"
+    replace    = "***REDACTED_NUM***"
+  }
+
+  forward_to = [loki.write.default.receiver]   // hand cleaned logs to the sender
+}
+
+// -----------------------------------------------------------------------------
+// 4. SEND: to Loki. The ADDRESS is read from the LOKI_ENDPOINT environment
+//    variable -- it lives on the Pi (set via the service's env), NOT in this
+//    file, so the repo carries rules only and no address/secret.
+//    Until Loki exists, leave LOKI_ENDPOINT unset and keep Alloy stopped.
+//    When ready:  LOKI_ENDPOINT=http://<LOKI_TAILSCALE_IP>:3100/loki/api/v1/push
+// -----------------------------------------------------------------------------
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_ENDPOINT")
+    // Loki sits behind Tailscale (auth_enabled:false + tailnet ACLs are the
+    // access control), so no basic_auth/tls block is needed here. If you ever
+    // expose Loki differently, add auth here and source it from the environment.
+  }
+  external_labels = {
+    environment = "prod",
+    tier        = "pi",
+  }
+}
