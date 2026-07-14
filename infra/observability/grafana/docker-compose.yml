@@ -1,0 +1,12 @@
+services:
+  grafana:
+    image: grafana/grafana:11.5.0
+    container_name: grafana-local
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  grafana-data:
