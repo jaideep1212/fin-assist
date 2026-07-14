@@ -41,12 +41,13 @@ unit-testable without a database, real time, or blob storage.
 from __future__ import annotations
 
 import enum
-import logging
 from datetime import date, datetime, time as dtime, timedelta
 from typing import Callable, Optional, Protocol
 from zoneinfo import ZoneInfo
 
-log = logging.getLogger("watchdog")
+from app.obs_logging import get_logger
+
+log = get_logger("watchdog")
 
 
 class State(str, enum.Enum):
@@ -129,8 +130,14 @@ class DailyWatchdog:
             return bool(self._marker.is_done(logical_day))  # type: ignore[union-attr]
         except Exception:
             log.warning(
-                "Marker check failed for %s; failing open (will run).",
-                logical_day,
+                f"marker check failed for {logical_day}; failing open (will run)",
+                extra={
+                    "fields": {
+                        "event": "marker_check",
+                        "status": "error",
+                        "run_date": logical_day.isoformat(),
+                    }
+                },
                 exc_info=True,
             )
             return False
@@ -144,8 +151,14 @@ class DailyWatchdog:
             self._marker.mark_done(logical_day, {"run_at": self._clock().isoformat()})
         except Exception:
             log.warning(
-                "Failed to write done-marker for %s (non-fatal).",
-                logical_day,
+                f"failed to write done-marker for {logical_day} (non-fatal)",
+                extra={
+                    "fields": {
+                        "event": "marker_write",
+                        "status": "error",
+                        "run_date": logical_day.isoformat(),
+                    }
+                },
                 exc_info=True,
             )
 
@@ -160,7 +173,16 @@ class DailyWatchdog:
         if logical_date != self._run_date:
             self._run_date = logical_date
             self.state = State.PENDING
-            log.info("Armed for watchdog day starting %s.", day_start_dt.isoformat())
+            log.info(
+                f"armed for watchdog day starting {day_start_dt.isoformat()}",
+                extra={
+                    "fields": {
+                        "event": "armed",
+                        "status": "ok",
+                        "run_date": logical_date.isoformat(),
+                    }
+                },
+            )
 
         # Persistent marker is authoritative for DONE when present. Checked every
         # tick so that deleting/renaming the marker forces a re-run even on a
@@ -169,13 +191,29 @@ class DailyWatchdog:
             if self._marker_is_done(logical_date):
                 if self.state is not State.DONE:
                     self.state = State.DONE
-                    log.info("Marker present for %s; settled (done).", logical_date)
+                    log.info(
+                        f"marker present for {logical_date}; settled (done)",
+                        extra={
+                            "fields": {
+                                "event": "settled",
+                                "status": "done",
+                                "run_date": logical_date.isoformat(),
+                            }
+                        },
+                    )
                 return self.state
             # Marker absent -> not done. If we thought we were DONE, the marker
             # was cleared manually -> re-arm for a forced run.
             if self.state is State.DONE:
                 log.info(
-                    "Marker for %s cleared; re-arming for a forced run.", logical_date
+                    f"marker for {logical_date} cleared; re-arming for a forced run",
+                    extra={
+                        "fields": {
+                            "event": "marker_cleared",
+                            "status": "ok",
+                            "run_date": logical_date.isoformat(),
+                        }
+                    },
                 )
                 self.state = State.PENDING
 
@@ -187,13 +225,25 @@ class DailyWatchdog:
         if now >= self._cutoff_dt(day_start_dt):
             self.state = State.MISSED
             log.warning(
-                "Cutoff reached; no successful run for watchdog day %s.", self._run_date
+                f"cutoff reached; no successful run for watchdog day {self._run_date}",
+                extra={
+                    "fields": {
+                        "event": "missed",
+                        "status": "error",
+                        "run_date": self._run_date.isoformat()
+                        if self._run_date
+                        else None,
+                    }
+                },
             )
             return self.state
 
         # Not reachable yet — try again next tick.
         if not self._is_awake():
-            log.info("Pi not reachable; will retry.")
+            log.info(
+                "pi not reachable; will retry",
+                extra={"fields": {"event": "pi_unreachable", "status": "retry"}},
+            )
             return self.state
 
         # Reachable and pending — run once.
@@ -202,8 +252,30 @@ class DailyWatchdog:
             self._job(self._run_date)
             self.state = State.DONE
             self._marker_mark_done(self._run_date)
-            log.info("Job done for watchdog day %s.", self._run_date)
+            log.info(
+                f"job done for watchdog day {self._run_date}",
+                extra={
+                    "fields": {
+                        "event": "job_done",
+                        "status": "ok",
+                        "run_date": self._run_date.isoformat()
+                        if self._run_date
+                        else None,
+                    }
+                },
+            )
         except Exception:
             self.state = State.PENDING
-            log.exception("Job failed for %s; will retry next tick.", self._run_date)
+            log.exception(
+                f"job failed for {self._run_date}; will retry next tick",
+                extra={
+                    "fields": {
+                        "event": "job_failed",
+                        "status": "error",
+                        "run_date": self._run_date.isoformat()
+                        if self._run_date
+                        else None,
+                    }
+                },
+            )
         return self.state
