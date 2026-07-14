@@ -74,6 +74,40 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
+from app.obs_logging import configure_root_logging, get_logger, scrub
+
+log = get_logger("orchestrator")
+
+# Exact-match redactions for THIS project's own identifiers, read from env once.
+# Subscription/tenant/client IDs aren't secrets, but they're noise we don't need
+# in logs -- mask the specific known values wherever terraform/az echo them.
+_KNOWN_IDS = None
+
+
+def _redact(text: str) -> str:
+    """Source-side redaction for a line of subprocess output.
+
+    The orchestrator ships STRAIGHT to Log Analytics with no shipper in front,
+    so terraform/az stdout must be cleaned right here -- this is the only scrub
+    point. Runs the shared secret/PII scrubber (app/obs_logging.scrub), then
+    masks this project's own known ARM_* identifiers.
+    """
+    global _KNOWN_IDS
+    if _KNOWN_IDS is None:
+        _KNOWN_IDS = []
+        for var, tag in (
+            ("ARM_SUBSCRIPTION_ID", "***SUBSCRIPTION***"),
+            ("ARM_TENANT_ID", "***TENANT***"),
+            ("ARM_CLIENT_ID", "***CLIENT_ID***"),
+        ):
+            val = os.getenv(var)
+            if val and len(val) >= 8:
+                _KNOWN_IDS.append((val, tag))
+    text = scrub(text)
+    for needle, tag in _KNOWN_IDS:
+        text = text.replace(needle, tag)
+    return text
+
 
 RG = os.getenv("FIN_RESOURCE_GROUP", "fin-assist-rg")
 ACCOUNT = os.getenv("FIN_STORAGE_ACCOUNT", "finassistdata")
@@ -265,7 +299,9 @@ def _load_dotenv():
             break
     if env_path is None:
         return
-    print(f"loading env from {env_path}")
+    print(
+        f"loading env from {env_path}"
+    )  # pre-logging bootstrap; path only, no secrets
     for line in env_path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -321,14 +357,44 @@ def _ensure_python_runtime_deps():
 
 def run(cmd, *, capture=False, env=None, check=True):
     shell = isinstance(cmd, str)
-    print(f"\n$ {cmd if shell else ' '.join(cmd)}")
-    proc = subprocess.run(cmd, shell=shell, env=env, capture_output=capture, text=True)
+    printable = cmd if shell else " ".join(cmd)
+    # Tamed, redacted echo of the command. The full command can carry IDs (and,
+    # if someone slips up, a secret), so scrub before it hits the logs.
+    log.info(
+        _redact(f"$ {printable}"),
+        extra={"fields": {"event": "run_command", "status": "ok"}},
+    )
+
+    if capture:
+        # Captured output is returned to the CALLER (e.g. the DB URL, the storage
+        # key) and never logged on success. On failure, redact before surfacing.
+        proc = subprocess.run(cmd, shell=shell, env=env, capture_output=True, text=True)
+        if check and proc.returncode != 0:
+            sys.stderr.write(_redact(proc.stdout or ""))
+            sys.stderr.write(_redact(proc.stderr or ""))
+            raise SystemExit(f"FATAL: command failed ({proc.returncode}).")
+        return proc.stdout.strip()
+
+    # Not captured: STREAM the child's output through the redactor line by line,
+    # so terraform/az stdout (which prints resource IDs) is cleaned before it
+    # reaches the container logs. (Previously this inherited stdout raw -- which
+    # is why unredacted `id=/subscriptions/...` lines were showing up.)
+    proc = subprocess.Popen(
+        cmd,
+        shell=shell,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(_redact(line.rstrip("\n")), flush=True)
+    proc.wait()
     if check and proc.returncode != 0:
-        if capture:
-            sys.stderr.write(proc.stdout or "")
-            sys.stderr.write(proc.stderr or "")
         raise SystemExit(f"FATAL: command failed ({proc.returncode}).")
-    return proc.stdout.strip() if capture else None
+    return None
 
 
 # --- azure CLI session isolation -----------------------------------------
@@ -685,7 +751,14 @@ def main() -> int:
     destroy_enabled = args.destroy == "yes"
     post_load = args.post_load if args.post_load is not None else DEFAULT_POST_LOAD
 
-    print(f"=== staging pipeline | destroy={args.destroy} ===")
+    # Route logging through the safe JSON formatter + scrubber (for our own
+    # structured events and any third-party logs). Terraform/az subprocess output
+    # is redacted separately in run() and printed as human-readable passthrough.
+    configure_root_logging()
+    log.info(
+        f"staging pipeline start (destroy={args.destroy})",
+        extra={"fields": {"event": "pipeline_start", "status": "ok"}},
+    )
 
     # Load .env (so terraform/load/verify subprocesses inherit it) and make sure
     # the terraform admin password is available, BEFORE we start creating things.
@@ -701,20 +774,31 @@ def main() -> int:
         server_created = True
         url = tf_output_url()
         server = server_name_from_url(url)
-        print(f"staging server: {server}")
+        log.info(
+            f"staging server ready: {server}",
+            extra={"fields": {"event": "server_ready", "status": "ok"}},
+        )
 
         if _running_in_azure():
-            print(
-                "running in Azure (CONTAINER_APP_NAME set) - skipping client "
-                "firewall rule; the allow-Azure rule already permits this."
+            log.info(
+                "running in Azure; skipping client firewall rule (allow-Azure rule permits this)",
+                extra={"fields": {"event": "firewall_skipped", "status": "ok"}},
             )
         else:
             ip = public_ip(args.client_ip)
-            print(f"allowing client IP {ip} through the firewall")
+            log.info(
+                _redact(f"allowing client IP {ip} through the firewall"),
+                extra={"fields": {"event": "firewall_added", "status": "ok"}},
+            )
             add_firewall_rule(server, ip)
 
         run_date = args.run_date or latest_partition_date()
-        print(f"run date (dt=): {run_date}")
+        log.info(
+            f"run date {run_date}",
+            extra={
+                "fields": {"event": "run_date", "status": "ok", "run_date": run_date}
+            },
+        )
         source = download_partition(run_date, workdir)
 
         env = contract_env(url, run_date, source)
@@ -732,18 +816,24 @@ def main() -> int:
         # staging DB stays alive for the whole downstream step (even if that
         # step is a separate container/job the command starts and blocks on).
         if not post_load or post_load.strip().lower() in ("none", ""):
-            print(
-                "WARNING: no post-load script configured (POST_LOAD_CMD unset) "
-                "- nothing to run against the loaded data. The tables remain "
-                "loaded in the staging DB; run verification manually if needed "
-                "(python app/verify_decrypt_export.py --profile Azure) while "
-                "the server is up."
+            log.warning(
+                "no post-load script configured (POST_LOAD_CMD unset); tables remain "
+                "loaded, run verification manually while the server is up",
+                extra={"fields": {"event": "post_load_skipped", "status": "warning"}},
             )
         else:
-            print(f"running post-load step (waiting for completion): {post_load}")
+            log.info(
+                _redact(
+                    f"running post-load step (waiting for completion): {post_load}"
+                ),
+                extra={"fields": {"event": "post_load_start", "status": "ok"}},
+            )
             run(post_load, env=env)
 
-        print("\n=== pipeline succeeded ===")
+        log.info(
+            "pipeline succeeded",
+            extra={"fields": {"event": "pipeline_succeeded", "status": "ok"}},
+        )
         return 0
 
     finally:
@@ -751,17 +841,24 @@ def main() -> int:
             # apply never ran/failed -> nothing to tear down or warn about.
             pass
         elif destroy_enabled:
-            print("\n--- tearing down staging server ---")
+            log.info(
+                "tearing down staging server",
+                extra={"fields": {"event": "teardown_start", "status": "ok"}},
+            )
             try:
                 tf_destroy()
             except SystemExit:
-                sys.stderr.write(
-                    "WARNING: terraform destroy failed. A staging server may "
-                    "still be running and BILLING. Run manually:\n"
-                    f"    terraform -chdir={TF_DIR} destroy -auto-approve\n"
+                log.error(
+                    "terraform destroy failed; a staging server may still be running "
+                    "and BILLING -- tear it down manually",
+                    extra={"fields": {"event": "teardown_failed", "status": "error"}},
                 )
         else:
-            print("\n" + "=" * 60)
+            log.warning(
+                "server left running (--destroy no); it is BILLING until torn down",
+                extra={"fields": {"event": "server_left_running", "status": "warning"}},
+            )
+            print("=" * 60)
             print("SERVER LEFT RUNNING (--destroy no). It is BILLING until you")
             print("tear it down. When finished, run:")
             print(f"    terraform -chdir={TF_DIR} destroy -auto-approve")
