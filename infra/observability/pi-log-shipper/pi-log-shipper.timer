@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Pi log shipper every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

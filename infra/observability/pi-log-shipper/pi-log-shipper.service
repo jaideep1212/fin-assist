@@ -1,0 +1,10 @@
+[Unit]
+Description=Ship Pi relay logs to Azure Monitor (scrubbed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=<PI_USER_NAME>
+WorkingDirectory=/opt/pi-log-shipper
+ExecStart=/opt/pi-log-shipper/venv/bin/python /opt/pi-log-shipper/ship_logs.py
