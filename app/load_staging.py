@@ -21,15 +21,15 @@ Env:
 
 from __future__ import annotations
 
-import logging
 import os
-import re
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import create_engine, inspect, text
 
-log = logging.getLogger("staging.load")
+from app.obs_logging import configure_root_logging, get_logger
+
+log = get_logger("staging.load")
 
 _DDL_DEFAULT = Path(__file__).with_name("staging_ddl.sql")
 _SCHEMA = "staging"
@@ -39,7 +39,10 @@ def _run_ddl(engine, ddl_path: Path) -> None:
     sql = ddl_path.read_text()
     with engine.begin() as conn:
         conn.execute(text(sql))
-    log.info("Applied DDL from %s", ddl_path)
+    log.info(
+        f"applied DDL from {ddl_path}",
+        extra={"fields": {"event": "ddl_applied", "status": "ok"}},
+    )
 
 
 def _pick_partition(source: Path, run_date: str | None) -> Path:
@@ -73,22 +76,38 @@ def load_partition(engine, part_dir: Path) -> dict[str, int]:
         else:
             # No explicit DDL (e.g. dim_entities) -> auto-create from parquet.
             log.warning(
-                "No DDL for %s.%s; auto-creating from parquet (types "
-                "are pandas-inferred). Add real DDL when possible.",
-                _SCHEMA,
-                table,
+                f"no DDL for {_SCHEMA}.{table}; auto-creating from parquet "
+                f"(types are pandas-inferred). Add real DDL when possible.",
+                extra={
+                    "fields": {
+                        "event": "table_autocreate",
+                        "status": "ok",
+                        "table": table,
+                    }
+                },
             )
             df.to_sql(table, engine, schema=_SCHEMA, if_exists="replace", index=False)
 
         results[table] = len(df)
-        log.info("Loaded %s.%s (%d rows)", _SCHEMA, table, len(df))
+        log.info(
+            f"loaded {_SCHEMA}.{table} ({len(df)} rows)",
+            extra={
+                "fields": {
+                    "event": "table_loaded",
+                    "status": "ok",
+                    "table": table,
+                    "row_count": len(df),
+                }
+            },
+        )
     return results
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    # Route ALL logs (ours + sqlalchemy/psycopg) through the safe JSON formatter
+    # + scrubber. Important here: the STAGING_DATABASE_URL carries a password, so
+    # any driver error echoing it must be scrubbed. Replaces logging.basicConfig().
+    configure_root_logging()
     url = os.environ["STAGING_DATABASE_URL"]
     source = Path(os.environ.get("STAGING_SOURCE", "./_staging"))
     run_date = os.getenv("STAGING_RUN_DATE")
@@ -105,10 +124,23 @@ def main() -> None:
         raise
     _run_ddl(engine, ddl_path)
     part = _pick_partition(source, run_date)
-    log.info("Loading partition %s", part)
+    log.info(
+        f"loading partition {part}",
+        extra={"fields": {"event": "load_partition_start", "status": "ok"}},
+    )
     results = load_partition(engine, part)
     total = sum(results.values())
-    log.info("Done: %d tables, %d rows total.", len(results), total)
+    log.info(
+        f"done: {len(results)} tables, {total} rows total",
+        extra={
+            "fields": {
+                "event": "load_complete",
+                "status": "ok",
+                "table_count": len(results),
+                "row_count": total,
+            }
+        },
+    )
 
 
 if __name__ == "__main__":

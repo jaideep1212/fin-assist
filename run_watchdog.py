@@ -28,7 +28,6 @@ Env:
 
 from __future__ import annotations
 
-import logging
 import os
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
@@ -36,28 +35,43 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from app.markers import build_marker
+from app.obs_logging import configure_root_logging, get_logger
 from app.pi_data import fetch_all, is_pi_awake
 from app.sinks import Sink, build_sink
 from app.watchdog import DailyWatchdog
 
-log = logging.getLogger("watchdog.main")
+log = get_logger("watchdog.main")
 
 
 def build_daily_job(sink: Sink):
     def job(run_date):
         frames = fetch_all()
         for name, df in frames.items():
-            dest = sink.write(name, df, run_date)
-            log.info("Wrote %s (%d rows) -> %s", name, len(df), dest)
+            # `dest` is a path/blob name; kept out of structured fields (not on
+            # the allowlist) -- the safe facts are the table name and row count.
+            sink.write(name, df, run_date)
+            log.info(
+                "snapshot written",
+                extra={
+                    "fields": {
+                        "event": "snapshot_written",
+                        "table": name,
+                        "row_count": len(df),
+                        "run_date": run_date.isoformat()
+                        if hasattr(run_date, "isoformat")
+                        else str(run_date),
+                        "status": "ok",
+                    }
+                },
+            )
 
     return job
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    # Route ALL logs (ours + apscheduler/sqlalchemy/azure) through the safe JSON
+    # formatter + scrubber. Replaces logging.basicConfig().
+    configure_root_logging()
     tz = os.getenv("WATCHDOG_TZ", "UTC")
     dh, dm = (int(x) for x in os.getenv("WATCHDOG_DAY_START", "00:00").split(":"))
 
@@ -98,12 +112,10 @@ def main() -> None:
     # scheduler.add_job(monthly_job, "cron", day=1, hour=4, id="monthly")
 
     log.info(
-        "Watchdog up (tz=%s, day_start=%02d:%02d, cutoff=%s, markers=%s).",
-        tz,
-        dh,
-        dm,
-        watchdog._cutoff.strftime("%H:%M"),
-        "on" if marker is not None else "off",
+        f"watchdog up (tz={tz}, day_start={dh:02d}:{dm:02d}, "
+        f"cutoff={watchdog._cutoff.strftime('%H:%M')}, "
+        f"markers={'on' if marker is not None else 'off'})",
+        extra={"fields": {"event": "watchdog_up", "status": "ok"}},
     )
     scheduler.start()
 
